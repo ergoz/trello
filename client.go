@@ -48,7 +48,6 @@ func (c *client) BoardService() BoardService {
 const baseURL = "https://api.trello.com"
 
 func (b *boardService) GetBoard(id string) (Board, error) {
-
 	restURL := fmt.Sprintf("%s/1/boards/%s?key=%s", baseURL, id, b.client.key)
 	if len(b.client.token) > 0 {
 		restURL += fmt.Sprintf("&token=%s", b.client.token)
@@ -95,6 +94,9 @@ type board struct {
 	URL            string                 `json:"url"`
 	Prefs          map[string]interface{} `json:"prefs"`      // TODO(ttacon): pull concrete struct out
 	LabelNames     map[string]interface{} `json:"labelNames"` // same as prefs
+
+	// optional fields
+	BoardLists []*list `json:"lists"`
 }
 
 func (b *board) Name() string {
@@ -102,17 +104,52 @@ func (b *board) Name() string {
 }
 
 func (b *board) Lists() ([]List, error) {
+	restURL := fmt.Sprintf("%s/1/boards/%s?key=%s&lists=all", baseURL, b.ID, b.client.key)
+	if len(b.client.token) > 0 {
+		restURL += fmt.Sprintf("&token=%s", b.client.token)
+	}
+
 	// TODO(ttacon)
-	return nil, nil
+	req, err := http.NewRequest(
+		"GET",
+		restURL,
+		nil,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+
+	var d board
+	if err := json.NewDecoder(resp.Body).Decode(&d); err != nil {
+		resp.Body.Close()
+		return nil, err
+	}
+	resp.Body.Close()
+
+	d.client = b.client
+
+	// ugh, type rules...
+	ls := make([]List, len(d.BoardLists))
+	for i, list := range d.BoardLists {
+		ls[i] = list
+	}
+
+	return ls, nil
 }
 
 type list struct {
 	client *client `json:"-"`
 
-	name string
+	ID       string `json:"id"`
+	ListName string `json:"name"`
 }
 
 func (l *list) Name() string {
 	// TODO(ttacon)
-	return ""
+	return l.ListName
 }
