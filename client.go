@@ -2,6 +2,7 @@ package trello
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 )
@@ -21,6 +22,8 @@ type Board interface {
 
 type List interface {
 	Name() string
+	GetID() string
+	Rename(newName string) error
 }
 
 type client struct {
@@ -131,11 +134,10 @@ func (b *board) Lists() ([]List, error) {
 	}
 	resp.Body.Close()
 
-	d.client = b.client
-
 	// ugh, type rules...
 	ls := make([]List, len(d.BoardLists))
 	for i, list := range d.BoardLists {
+		list.client = b.client
 		ls[i] = list
 	}
 
@@ -152,4 +154,34 @@ type list struct {
 func (l *list) Name() string {
 	// TODO(ttacon)
 	return l.ListName
+}
+
+func (l *list) GetID() string {
+	return l.ID
+}
+
+func (l *list) Rename(newName string) error {
+	restURL := fmt.Sprintf("%s/1/lists/%s/name?key=%s&value=%s",
+		baseURL, l.ID, l.client.key, newName)
+	if len(l.client.token) > 0 {
+		restURL += fmt.Sprintf("&token=%s", l.client.token)
+	}
+
+	req, err := http.NewRequest(
+		"PUT",
+		restURL,
+		nil,
+	)
+	if err != nil {
+		return err
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	} else if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return errors.New("bad response code: " + resp.Status)
+	}
+
+	return nil
 }
