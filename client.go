@@ -5,17 +5,24 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 )
 
 type Client interface {
 	BoardService() BoardService
+	ListService() ListService
 }
 
 type BoardService interface {
 	GetBoard(id string) (Board, error)
 }
 
+type ListService interface {
+	Create(name, boardID, pos string) (List, error)
+}
+
 type Board interface {
+	GetID() string
 	Name() string
 	Lists() ([]List, error)
 }
@@ -24,6 +31,7 @@ type List interface {
 	Name() string
 	GetID() string
 	Rename(newName string) error
+	Close() error
 }
 
 type client struct {
@@ -44,6 +52,12 @@ func NewClient(key, token string) Client {
 
 func (c *client) BoardService() BoardService {
 	return &boardService{
+		client: c,
+	}
+}
+
+func (c *client) ListService() ListService {
+	return &listService{
 		client: c,
 	}
 }
@@ -100,6 +114,10 @@ type board struct {
 
 	// optional fields
 	BoardLists []*list `json:"lists"`
+}
+
+func (b *board) GetID() string {
+	return b.ID
 }
 
 func (b *board) Name() string {
@@ -162,7 +180,7 @@ func (l *list) GetID() string {
 
 func (l *list) Rename(newName string) error {
 	restURL := fmt.Sprintf("%s/1/lists/%s/name?key=%s&value=%s",
-		baseURL, l.ID, l.client.key, newName)
+		baseURL, l.ID, l.client.key, url.QueryEscape(newName))
 	if len(l.client.token) > 0 {
 		restURL += fmt.Sprintf("&token=%s", l.client.token)
 	}
@@ -184,4 +202,72 @@ func (l *list) Rename(newName string) error {
 	}
 
 	return nil
+}
+
+func (l *list) Close() error {
+	restURL := fmt.Sprintf("%s/1/lists/%s/name?key=%s&value=true",
+		baseURL, l.ID, l.client.key)
+	if len(l.client.token) > 0 {
+		restURL += fmt.Sprintf("&token=%s", l.client.token)
+	}
+
+	req, err := http.NewRequest(
+		"PUT",
+		restURL,
+		nil,
+	)
+	if err != nil {
+		return err
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	} else if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return errors.New("bad response code: " + resp.Status)
+	}
+
+	return nil
+}
+
+type listService struct {
+	client *client
+}
+
+func (l *listService) Create(name, boardID, pos string) (List, error) {
+	restURL := fmt.Sprintf("%s/1/lists?key=%s&name=%s&idBoard=%s",
+		baseURL, l.client.key, url.QueryEscape(name), url.QueryEscape(boardID))
+	if len(pos) > 0 {
+		restURL += fmt.Sprintf("&pos=%s", pos)
+	}
+	if len(l.client.token) > 0 {
+		restURL += fmt.Sprintf("&token=%s", l.client.token)
+	}
+
+	req, err := http.NewRequest(
+		"POST",
+		restURL,
+		nil,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	} else if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return nil, errors.New("bad response code: " + resp.Status)
+	}
+
+	var ll = list{
+		client: l.client,
+	}
+	if err = json.NewDecoder(resp.Body).Decode(&ll); err != nil {
+		resp.Body.Close()
+		return nil, err
+	}
+	resp.Body.Close()
+
+	return &ll, nil
 }
